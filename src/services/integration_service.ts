@@ -4,6 +4,7 @@ const tf = require('@tensorflow/tfjs');
 // import * as tf from '@tensorflow/tfjs';
 // import * as tfnode from '@tensorflow/tfjs-node';
 // import ARIMA from 'javascript-arima';
+const axios = require('axios');
 
 import events from '../events';
 import Helper from '../pool/helper';
@@ -327,6 +328,240 @@ export class IntegrationService {
     //         resolve(_response);
     //     });
     // }
+    
+    public async PredictiveAnalysis(): Promise<object> {
+        let _response: any = {};
+    
+        return new Promise(async resolve => {
+            try {
+                // const pool = Helper.mongodbpool();
+                // const _mongodb = await pool.connectMongodb(process.env);
+                // const collection = await _mongodb.collection('tbl_scheme_mf_list');
+                // const data = await collection.find({ scheme_code: "124180" }).toArray();
+
+                // Define model hyperparameters
+                const timeSteps = 60;
+                const numFeatures = 1;
+                // const units = 50;
+                // const epochs = 100;
+                // const batchSize = 32;
+                // const optimizer = 'adam';
+                // const loss = 'meanSquaredError';
+
+
+                async function fetchDataFromAPIorDB() {
+                    try {
+                        const apiKey = '2Z9SXUH2I9XFH19I';
+                        const symbol = 'SPY';
+                        const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&apikey=${apiKey}`;
+                        
+                        const response = await axios.get(url);
+                        const data = response.data['Time Series (Daily)'];
+                        
+                        // Check if the data is undefined or null
+                        if (!data) {
+                            throw new Error('Time Series (Daily) data not found in the response');
+                        }
+                
+                        // Convert the data into an array of closing prices
+                        const historicalPriceData = Object.keys(data).map(date => parseFloat(data[date]['4. close']));
+                        
+                        return historicalPriceData.reverse(); // Reverse to have the oldest date first
+                
+                    } catch (error: any) {
+                        console.error('Error fetching data:', error.message);
+                        return [];
+                    }
+                }
+                
+    
+                const createModel = () => {
+                    const model = tf.sequential();
+                
+                    model.add(tf.layers.lstm({
+                        units: 50,
+                        returnSequences: true,
+                        inputShape: [timeSteps, numFeatures]
+                    }));
+
+                    model.add(tf.layers.lstm({
+                        units: 50,
+                        returnSequences: false
+                    }));
+
+                    model.add(tf.layers.dense({
+                        units: 1
+                    }));
+                
+                    model.compile({
+                        optimizer: 'adam',
+                        loss: 'meanSquaredError'
+                    });
+                
+                    return model;
+                };
+
+                const prepareTestData = (data: any, timeSteps: any) => {
+                    const X_test = [];
+                
+                    // Loop through the data to create the test sequences
+                    for (let i = timeSteps; i < data.length; i++) {
+                        // Slice the data from (i - timeSteps) to i and push it to X_test
+                        X_test.push(data.slice(i - timeSteps, i));
+                    }
+                
+                    // Convert X_test to a 3D tensor
+                    return tf.tensor3d(X_test, [X_test.length, timeSteps, 1]);  // Assuming 1 feature (price)
+                };
+
+                const prepareData = (data: any, timeSteps: any) => {
+                    const X = [];
+                    const y = [];
+                
+                    for (let i = timeSteps; i < data.length; i++) {
+                        X.push(data.slice(i - timeSteps, i));
+                        y.push(data[i]);
+                    }
+                
+                    return {
+                        X: tf.tensor3d(X),
+                        y: tf.tensor2d(y, [y.length, 1])
+                    };
+                };
+
+                const trainModel = async (model: any, X_train: any, y_train: any, epochs = 100) => {
+                    return await model.fit(X_train, y_train, {
+                        epochs: epochs,
+                        batchSize: 32,
+                        validationSplit: 0.2
+                    });
+                };
+
+                const predict = (model: any, X_test: any) => {
+                    return model.predict(X_test);
+                };
+
+                const historicalPriceData = await fetchDataFromAPIorDB();
+
+                const model = createModel();
+                const { X, y } = prepareData(historicalPriceData, 60);
+                
+                // const { X_train, y_train } = prepareData(historicalPriceData, timeSteps);
+                const X_test = prepareTestData(historicalPriceData, 60);
+
+                trainModel(model, X, y).then(() => {
+                    const predictions = predict(model, X_test);
+                    console.log(predictions);
+                });
+    
+                // const result: any = await main(data[0]);
+    
+                // if (result) {
+                //     _response = {
+                //         code: '000',
+                //         message: 'Predict',
+                //         result: result
+                //     };
+                // }
+
+            } catch (err: any) {
+                _response = {
+                    code: '500',
+                    message: 'An error occurred during validation.',
+                    error: err.message
+                };
+                throw err;
+            }
+    
+            resolve(_response);
+        });
+    }
+
+    public async RiskManagement(params: any): Promise<object> {
+        let _response: any = {};
+    
+        return new Promise(async resolve => {
+            try {
+                const pool = Helper.mongodbpool();
+                const _mongodb = await pool.connectMongodb(process.env);
+                const collection = await _mongodb.collection('tbl_scheme_mf_list');
+                const data = await collection.find({ scheme_code: "124180" }).toArray();
+    
+                // [NAV, market_conditions, historical_performance, volatility, interest_rates, economic_indicators, fund_type]
+
+                // Example of preprocessing data
+                const historicalData = tf.tensor2d([
+                    // [NAV, market_condition, historical_performance]
+                    [120, 0.5, 0.7],
+                    [130, 0.6, 0.8],
+                    [125, 0.4, 0.75],
+                    // Add more historical data here
+                ]);
+
+                // Define a simple model
+                const model = tf.sequential();
+                model.add(tf.layers.dense({ units: 32, inputShape: [3], activation: 'relu' }));
+                model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+                model.add(tf.layers.dense({ units: 1 })); // Output risk score
+
+                model.compile({
+                    optimizer: tf.train.adam(),
+                    loss: 'meanSquaredError',
+                });
+
+                // Training the model (placeholder data for example)
+                const riskScores = tf.tensor2d([
+                    [0.2], // Corresponding risk score for the first row in historicalData
+                    [0.3], // Corresponding risk score for the second row in historicalData
+                    [0.25], // Corresponding risk score for the third row in historicalData
+                    // Add more target risk scores here
+                ]);
+
+                model.fit(historicalData, riskScores, {
+                    epochs: 50,
+                    callbacks: {
+                        onEpochEnd: (epoch: any, logs: any) => {
+                            console.log(`Epoch ${epoch}: loss = ${logs.loss}`);
+                        }
+                    }
+                });
+
+                // Predicting the risk for new data
+                const newData = tf.tensor2d([[128, 0.55, 0.77]]);
+                model.predict(newData).print();
+
+                // Simulate market stress conditions
+                const stressTestScenarios = tf.tensor2d([
+                    [128, 0.9, 0.6], // High market volatility scenario
+                    [130, 0.7, 0.8], // Moderate market volatility scenario
+                    [125, 0.3, 0.9], // Low market volatility scenario
+                ]);
+
+                // Predicting under stress conditions
+                const stressTestResults = model.predict(stressTestScenarios);
+                stressTestResults.print();
+                    
+                // const result: any = await main(data[0]);
+    
+                // if (result) {
+                //     _response = {
+                //         code: '000',
+                //         message: 'Predict',
+                //         result: result
+                //     };
+                // }
+            } catch (err: any) {
+                _response = {
+                    code: '500',
+                    message: 'An error occurred during validation.',
+                    error: err.message
+                };
+                throw err;
+            }
+    
+            resolve(_response);
+        });
+    }
 
 }
 
